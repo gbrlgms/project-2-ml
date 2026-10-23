@@ -1,275 +1,245 @@
 ![Ironhack logo](https://user-images.githubusercontent.com/23629340/40541063-a07a0a8a-601a-11e8-91b5-2f13e4e6b441.png)
 
-# Project 2 | Machine Learning: From Data to Predictions
+# Deep Impressions: Training a Neural Network to Recognize Painters
 
-*Data Science & Machine Learning — Week 6*
+**Project 2 | Machine Learning: From Data to Predictions**
 
-Build a supervised machine learning model that a business could actually use. You will frame a prediction problem, prepare the data, compare models honestly, evaluate the winner once, explain what drives it, and demo it live.
+Gabriel Gomes |  Ironhack Data Science & Machine Learning Bootcamp 
 
-`Python` · `scikit-learn` · `Pipelines` · `Cross-validation` · `Model evaluation` · `Keras (image option)`
+How well can a neural network tell apart painters with very similar styles from adjacent art movements? This project trains an image classifier to name the painter of a painting, choosing among Monet, Renoir, Morisot, Manet, Cézanne, and Van Gogh.
+
+## Result at a glance
+
+| | Accuracy | Macro-F1 |
+|---|---:|---:|
+| Baseline (always answer "Van Gogh") | 0.335 | 0.084 |
+| **Final model, test set (812 paintings)** | **0.873** | **0.806** (95% CI 0.766 to 0.840) |
+| Final model, validation set | 0.878 | 0.820 |
+
+The final model is a MobileNetV2 pretrained on ImageNet, with its last four blocks fine-tuned on the paintings. On paintings it had never seen, it names the right painter about 7 times in 8. The validation score falls inside the test interval, so the estimate was honest. Its weakest point is Manet: about half of its "Manet" labels are wrong.
 
 ---
 
-## Overview
+## 1. The question
 
-In this project you take one dataset from raw files to a saved model that predicts for new data, following the workflow template from Week 5. The point is not the highest score in the class. It is a model whose score you can trust, chosen for reasons you can explain, and judged against a baseline.
+**What is predicted:** given an image of a painting, which of six painters made it.
 
-- **Format** — in pairs or on your own. Working in a pair, divide the work by stage, not by model, and run each other's notebooks every day.
-- **Duration** — launch on Friday of Week 5, 4 working days, presentations on Friday.
-- **Tools** — Python, pandas, scikit-learn, Matplotlib/Seaborn, joblib, Jupyter, GitHub. Keras for the image option.
-- **Repository** — click **Use this template** at the top of this page to create your own repo.
+**Why these six:** they form a continuum of neighboring styles, which is what makes the task hard.
 
-### The goal
+| Style | Painters | Note |
+|---|---|---|
+| Realism → Impressionism | Manet | The bridge: never exhibited with the group, but inspired it |
+| Impressionism | Monet, Renoir, Morisot | The core of the movement |
+| Post-Impressionism | Cézanne, Van Gogh | Kept the bright color, pushed toward structure (Cézanne) and emotion (Van Gogh) |
 
-Answer one question with a model: *who will leave, what is this house worth, whom should we call, which flower is this?* By Friday you should be able to say how good your model is, compared with what, for whom, and where it should not be trusted.
+**For whom, and what they would do with it:** catalogers with unlabeled or doubtful entries, museum visitors who want a hint about what they are looking at, and art students training their eye. In each case the model proposes a painter and a person confirms or corrects it. It is a shortlist generator, not an authority, so a wrong suggestion is caught in review. These are the scenarios the project was designed for, not users it was tested with.
 
-> [!IMPORTANT]
-> Choose your dataset and your target on launch day and stick with them. By Wednesday your pipeline and your cross-validation are built around your columns; switching costs four days of work in two.
+**Target and positive class:** the target is the painter's name, a categorical variable with 6 classes. This is multi-class classification, so there is no single positive class. Each painter is treated as the positive class in turn (one-vs-rest) when computing per-class precision, recall, and F1.
 
-<br>
+## 2. The data
 
-## The workflow at a glance
+**Source**: WikiArt, an online art encyclopedia in which each artwork is labeled with its artist, style, and genre. The images were downloaded with the open-source [WikiART Crawler](https://github.com/asahi417/wikiart-image-dataset) (`wikiartcrawler`), a Python library that fetches images from WikiArt through its API, one artist at a time, and caches them on the local machine. For each of the six painters, the crawler's `get_painting` call returns the paths of that painter's downloaded images, which is where the artist label comes from.
 
-Your project follows the eleven steps of **The ML Workflow End to End** from Week 5. The brief, the run sheets and the rubric all use them:
+**License**: only paintings in the public domain were kept. The images are downloaded from WikiArt onto the user's own machine and remain subject to WikiArt's terms of use, so they are not included in this repository. The images are reproductions of varying quality, and the labels (the artist each image was requested for) come from the site, so they are useful but not perfect.
 
-1. **Frame** — the target, the positive class, who uses the prediction, and the metric, chosen from the cost of each mistake.
-2. **Look** — types, missing values, duplicates, the target's distribution, columns that would not be known at prediction time.
-3. **Split once** — a fixed `random_state`, stratified for classification. The test set is not touched again until step 9.
-4. **Baseline** — a `DummyClassifier` or `DummyRegressor`, scored with cross-validation. Every model has to beat it.
-5. **Pipeline** — a `ColumnTransformer` for each column type, then the model. Everything that learns from data goes inside.
-6. **Compare** — at least three model families, the same cross-validation folds, the mean and the spread.
-7. **Tune** — a grid or random search on the best one or two, on the training set.
-8. **Threshold** — for classification, chosen from cross-validated probabilities for a stated reason.
-9. **Test once** — the final model on the test set, compared with the cross-validated estimate.
-10. **Interpret** — what drives the predictions, and where the model goes wrong.
-11. **Save** — the fitted pipeline with `joblib`, reloaded to predict new rows.
+**What one row is:** one painting image.
 
-The three notebooks in this template follow that order: `01_eda_and_baseline.ipynb` is steps 1–4, `02_pipelines_and_models.ipynb` is steps 5–8, and `03_evaluation_and_interpretation.ipynb` is steps 9–11.
+| Column | Type | Role |
+|---|---|---|
+| `path` | text | File location of the image, the model's input |
+| `artist` | text | The painter, **the target** |
+| `title` | text | Metadata only, never used as an input |
 
-<br>
+**Size and balance:** 5,770 images. The classes are strongly imbalanced, at roughly 8 to 1 between the largest and the smallest.
 
-## Choose your data
+| Painter | Images | Share |
+|---|---:|---:|
+| Van Gogh | 1,929 | 33.4% |
+| Renoir | 1,412 | 24.5% |
+| Monet | 1,365 | 23.7% |
+| Cézanne | 587 | 10.2% |
+| Morisot | 242 | 4.2% |
+| Manet | 235 | 4.1% |
 
-Three tabular datasets forming a difficulty ladder, plus an image option. Read [`data/README.md`](data/README.md) for the full description of each, the traps to watch for, and its licence.
+**Traps found and how they were handled**
 
-| | Dataset | Task | Difficulty | Licence |
-|---|---|---|---|---|
-| **1** | **King County house sales** | Regression: the sale price | Gentler start | Public domain |
-| **2** | **Telco customer churn** | Classification: who leaves | Middle | Apache 2.0 |
-| **3** | **Bank Marketing** (UCI) | Imbalanced classification: who subscribes | Hardest | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| **4** | **Flower photos** | Image classification: five flowers | Image option | [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/) |
+- **The same work appears more than once.** Painters repeated scenes (Monet's haystacks, Van Gogh's sunflowers), and the dataset also contains sketches and rescans. If one version lands in training and another in the test set, the model is tested on a scene it has already seen and the score looks better than it should. Near-duplicates were found with perceptual hashing (`imagededup`) and removed. **[Add the number of images or groups removed.]**
+- **The title can give the answer away** (*Water Lilies*, *Sunflowers*) and would not exist for a new, unlabeled painting, so it is never fed to the model.
+- **Class imbalance** is handled with a class-weighted loss and a metric that weighs every painter equally.
 
-Fetch whichever you choose with the included script:
+**Split:** 70% training, 15% validation, 15% test (812 test images), stratified by painter and saved as CSV files so that every notebook uses exactly the same split.
+
+## 3. Metric and baseline
+
+**Main metric: macro-averaged F1.** It averages the F1 score of the six painters, so Manet and Morisot (about 4% of the data each) count as much as Van Gogh (33%). Plain accuracy would reward a model that favors the large classes.
+
+**Which mistake costs more?** In a catalog, a confidently wrong attribution misleads the reader more than an honest "not sure", so the evaluation also looks at per-painter recall, the confusion matrix, and the model's confidence on its errors. No painter's misclassification is more costly than another's, so the metric is not weighted toward precision or recall for any particular class.
+
+**Baseline to beat:** a `DummyClassifier` that always predicts the most frequent painter.
+
+| Baseline | Accuracy | Macro-F1 |
+|---|---:|---:|
+| Most frequent class, 5-fold cross-validation | 0.335 ± 0.001 | 0.084 ± 0.000 |
+| Most frequent class, test set | 0.335 | 0.084 |
+| Guess by class share ("stratified"), test set | 0.246 | 0.166 |
+
+The always-"Van Gogh" model is right a third of the time but scores zero on five of the six painters. That gap between accuracy and macro-F1 is why accuracy is only reported next to the baseline.
+
+## 4. Models compared
+
+All models use the same splits, the same augmentation (random horizontal flip, rotation of up to ±18°, and zoom of up to 10%, applied only during training), the same class-weighted cross-entropy loss, the AdamW optimizer, 224×224 inputs, and **early stopping on the validation loss** (patience 5, best weights restored). The framework is PyTorch.
+
+| Model | What it is | Trainable parameters | Validation macro-F1 | Validation accuracy |
+|---|---|---:|---:|---:|
+| Baseline | Always the most frequent painter | n/a | 0.084 | 0.335 |
+| **CNN from scratch** | 3 convolution blocks (32, 64, 128 channels), global average pooling, dropout 0.4 | about 94,000 | 0.51 | 0.64 |
+| **MobileNetV2, frozen** | Pretrained on ImageNet; only a new final layer is trained (learning rate 1e-3) | 7,686 of 2.23 million | 0.76 | 0.835 |
+| **MobileNetV2, fine-tuned** | The same, with the last 4 of 19 feature blocks also trained (learning rate 1e-5); BatchNorm kept frozen | about 1.5 million | **0.82** | 0.878 |
+
+**What is transfer learning here?** ImageNet is a collection of about 1.2 million photographs in 1,000 everyday categories. A network pretrained on it has never seen art, but it already knows how to see edges, textures, and patterns. With only a few thousand paintings (a few hundred for Manet and Morisot), reusing those features works far better than learning them from nothing.
+
+**What the comparison showed**
+
+- The scratch CNN learned coarse cues such as color and stroke boldness: it sent 45 of 83 Cézanne paintings to Van Gogh.
+- Pretrained features lifted macro-F1 from 0.51 to 0.76, and fine-tuning added 0.06 more, with gains for all six painters (largest for Manet, +0.12, and Morisot, +0.09).
+- Fine-tuning overfits quickly (training macro-F1 reached about 0.94 against about 0.81 on validation), which is why early stopping was used.
+
+## 5. Final result against the baseline
+
+The test set was evaluated once, after the model, the stopping point, and the settings had been chosen.
+
+| | Accuracy | Macro-F1 | Loss |
+|---|---:|---:|---:|
+| Validation | 0.878 | 0.820 | 0.403 |
+| **Test** | **0.873** | **0.806** | 0.397 |
+| Baseline, most frequent (test) | 0.335 | 0.084 | n/a |
+| Baseline, stratified (test) | 0.246 | 0.166 | n/a |
+
+A bootstrap of the test set gives a 95% interval for the macro-F1 of **0.766 to 0.840**, and the validation estimate (0.820) lies inside it, so there is no sign of leakage or of overfitting to the validation set. The interval is fairly wide because Manet and Morisot have only about 33 and 35 test images.
+
+**Per-painter results on the test set**
+
+| Painter | Test images | Precision | Recall | F1 |
+|---|---:|---:|---:|---:|
+| Van Gogh | 272 | 0.96 | 0.92 | 0.94 |
+| Renoir | 198 | 0.94 | 0.89 | 0.91 |
+| Monet | 191 | 0.88 | 0.85 | 0.86 |
+| Cézanne | 83 | 0.78 | 0.84 | 0.81 |
+| Morisot | 35 | 0.68 | 0.80 | 0.74 |
+| Manet | 33 | 0.49 | 0.70 | 0.58 |
+
+### Where it goes wrong
+
+- **Errors happen between painters who share a technique.** Ten Renoir paintings are labeled Monet (light and loose brushwork, painted side by side). Manet and Morisot get swapped (both paint loose figures), and so do Van Gogh and Cézanne (both use strong color). Monet's errors are spread across every other painter, which fits his role as the reference point of the style.
+- **Manet is the catch-all.** He is predicted 47 times for 33 real paintings, so about half of the "Manet" labels are wrong. His style ranges from flat, dark early work to loose outdoor scenes, so the model uses his name for ambiguous paintings. Morisot shows the same effect, more mildly.
+- **The model is overconfident.** Even its wrong predictions average a confidence of about 0.7, so a high probability is not a guarantee.
+
+## 6. Limitations
+
+- **Closed set:** the model must choose one of the six painters, so a painting by Degas, Pissarro, or Sisley will become a confident Monet or Renoir.
+- **Reproductions only:** it was trained and tested on clean WikiArt images. Photos of framed paintings, sketches, drawings, and heavy crops are outside what it has seen.
+- **Small test classes:** the Manet and Morisot figures could shift by several points on a different sample.
+- **Interpretation:** the explanation that the model reads brushwork and texture, and not only color, is inferred from the error patterns and has not been proven (for example with saliency maps).
+- **Not for authentication or valuation:** 87% is not enough, and the model sees broad style, not the evidence an expert uses.
+
+**With more time:** calibrate the probabilities and choose the confidence cutoff on validation data; improve Manet and Morisot with tuned class weights and stronger augmentation; test on museum open-access collections and photos of paintings; try higher-resolution inputs and other backbones (for example EfficientNet, or CLIP embeddings with a logistic regression); and unfreeze fewer blocks with more regularization.
+
+---
+
+## 7. How to run it
+
+### Repository layout
+
+```
+project-2-ml/
+├── README.md
+├── app.py          # Streamlit demo
+├── data/split      # train.csv, val.csv, test.csv (created by the notebooks)
+├── data/raw        # images, one folder per data/raw (not included)
+│   ├── monet/
+│   ├── van gogh/
+│   └── ...
+├── models      # stored PyTorch models
+└── notebooks/                   
+```
+
+### 1. Environment
+
+Python 3.14 in a clean virtual environment is recommended. 
 
 ```bash
-python download_data.py houses    # or: telco, bank, flowers
+python3.14 -m venv .venv
+source .venv/bin/activate
+pip install torch torchvision pandas numpy scikit-learn matplotlib pillow \
+            imagededup networkx streamlit jupyter ipykernel
 ```
 
-Files land in `data/raw/`, which is gitignored. **Do not commit data.** Anyone cloning your repo runs the same script.
+On Apple Silicon the notebooks use the GPU through PyTorch's MPS backend when it is available. If an operation is unsupported, start Jupyter with `PYTORCH_ENABLE_MPS_FALLBACK=1`.
 
-> [!NOTE]
-> **Bringing your own dataset?** You may, and you are graded on exactly the same rubric. It needs a clear target, at least a few thousand rows (or a few hundred images per class), features that would all be known at prediction time, and a licence that permits educational use. Clear it with your teacher on launch day, not on Wednesday.
+### 2. Data
 
-### The image option
+The images are downloaded with the [WikiART Crawler](https://github.com/asahi417/wikiart-image-dataset). It needs an internet connection and caches the files in `~/.cache/wikiartcrawler` by default.
 
-Option 4 is for the material from Week 5 Thursday: a CNN trained from scratch, then transfer learning with a pretrained network. The workflow is the same, with three differences:
+1. Install the crawler:
 
-- **The baseline** is the majority class, then a small CNN from scratch; the real model is a pretrained network (for example `MobileNetV2`) with a new output layer.
-- **The pipeline lives in the model.** Resizing, rescaling and augmentation are Keras layers, and `image_dataset_from_directory` reads the folders. There is no `ColumnTransformer`.
-- **Validation is a fixed split**, not cross-validation: training, validation and test sets chosen once with a seed. Training on a CPU makes repeated folds too slow.
+   ```bash
+   git clone https://github.com/asahi417/wikiart-image-dataset
+   cd wikiart-image-dataset
+   pip install .
+   ```
 
-It needs TensorFlow (`python -c "import tensorflow"`) and the download is 218 MB. Everything else in this brief applies.
+2. Download the images of the six painters:
 
-<br>
+   ```python
+   from wikiartcrawler import WikiartAPI, available_artist
 
-## Day-by-day breakdown
+   print(available_artist())          # lists the artist aliases the API knows, e.g. 'paul-cezanne'
 
-Launch day (Friday of Week 5) is when you settle who you are working with, pick your dataset and target, create your repo, download the data and write your framing — so Monday starts with the data in front of you.
+   api = WikiartAPI()
+   ARTISTS = [...]                    # [the six aliases you used]
+   paths = {a: api.get_painting(a) for a in ARTISTS}   # local file paths per painter
+   ```
 
-### Day 1 — EDA and baseline
+3. Arrange the images as `data/raw/<artist>/<image>`, for example `data/raw/van gogh/starry_night.jpg`, and keep only the paintings that passed the public-domain check.
 
-- Finish **`01_eda_and_baseline.ipynb`**: shape and types, data quality, the target, the features against the target.
-- **Find the columns that would not be known at prediction time** and drop them, with the reason written down.
-- **Split once** and score the **baseline** with cross-validation on the training set.
+### 3. Notebooks
 
-> [!TIP]
-> By the end of today you should be able to say your metric and your baseline score out loud. If you cannot, you are behind.
+Run them in order:
 
-### Day 2 — Pipelines and features
+1. `01_eda_and_baseline.ipynb`
+2. `02_pipelines_and_models.ipynb`
+3. `03_evaluation_and_interpretation.ipynb`
 
-Today is the core engineering day, and the one the week turns on.
+The final model is saved as `model_mobilenet_tuned.pt`: the weights together with the class list, the best epoch, and the training history.
 
-- Build **one complete `Pipeline`**: a `ColumnTransformer` that imputes, scales and encodes each type of column, then a model.
-- Score it with **cross-validation** against the baseline.
-- Add features **inside the pipeline** — a ratio, an age, a flag, a log — and keep the ones that improve the cross-validated score.
-- *Image option:* load the folders with `image_dataset_from_directory`, add rescaling and augmentation layers, and train a CNN from scratch with early stopping. Plot the training curves.
-
-> [!IMPORTANT]
-> **Anyone without a pipeline scored with cross-validation on Tuesday evening has no Wednesday.** Everything after this builds on it.
-
-### Day 3 — Compare, tune, choose
-
-- Compare **at least three model families** — for example a linear model, a tree-based model and an ensemble — with the same folds, in **`02_pipelines_and_models.ipynb`**.
-- **Tune** the best one or two with `GridSearchCV` or `RandomizedSearchCV`, on the training set.
-- For classification, **choose the threshold** from cross-validated probabilities.
-- Choose your final model, and say why — including when a simpler model is within the noise of the best one.
-- *Image option:* transfer learning — a frozen pretrained network with a new output layer, against your CNN from scratch. Fine-tuning is optional.
-
-### Day 4 — Test once, interpret, communicate
-
-- In **`03_evaluation_and_interpretation.ipynb`**, evaluate the final model **once** on the test set.
-- Analyse the errors: the confusion matrix, or the residuals, and where the model is worst.
-- Explain what drives the predictions with **permutation importance**, and read it with care.
-- **Save the fitted pipeline** with `joblib` and reload it to predict new rows: this is your demo.
-- Write your README, build your slides, and **rehearse once, timed**.
-
-> [!NOTE]
-> **Notebook 03 is your report.** It is read on its own, by someone who has not seen notebooks 01 and 02: the question, the evidence, what you concluded and how far to trust it.
-
-<br>
-
-## Deliverables
-
-Your main deliverable is your GitHub repo, created from this template, containing:
-
-| Item | Description |
-|---|---|
-| `README.md` | Your project: the question, the data and its licence, the metric, the models compared, the final result against the baseline, and how to reproduce it. Replace this brief with your own. |
-| `notebooks/01_eda_and_baseline.ipynb` | Framing, EDA, the split and the baseline. |
-| `notebooks/02_pipelines_and_models.ipynb` | Pipelines, features, the model comparison, tuning and the threshold. |
-| `notebooks/03_evaluation_and_interpretation.ipynb` | **The report.** The test-set evaluation, the error analysis, the interpretation, and saving and reloading the model. |
-| `src/functions.py` | Reusable functions. Your logic lives in functions, not pasted into cells. |
-| `download_data.py` | Left as it is, or extended if you brought your own data. |
-| Slides | Linked or committed in your README, so they can be read after the presentation. Any tool. |
-
-The saved model in `models/` is gitignored: notebook 03 recreates it, so anyone can reproduce it.
-
-### Minimum requirements
-
-Your project must meet all of these to pass:
-
-- **Framing** — a stated target, positive class, user and decision, and a metric chosen from the cost of each mistake.
-- **No leakage** — columns not known at prediction time dropped; the test set used once; every step that learns from data inside the pipeline.
-- **Baseline** — scored with the same cross-validation as the models.
-- **Comparison** — at least **3 model families** on the same folds, with the mean and spread. *Image option:* a CNN from scratch and a transfer-learning model.
-- **Tuning** — the best one or two tuned on the training set.
-- **Evaluation** — the final model evaluated once on the test set, with an error analysis and, for classification, a justified threshold.
-- **Interpretation** — what drives the predictions, explained.
-- **A saved model** — reloaded to predict new data, in the notebook and in the demo.
-
-The full grading rubric is in [`RUBRIC.md`](RUBRIC.md). Read it on launch day — it tells you exactly what is being evaluated.
-
-<br>
-
-## Advanced features (optional)
-
-Not required, but they will strengthen your project:
-
-- **Learning curves** — does more data help? Train on growing fractions and plot the cross-validated score.
-- **Stacking** — a `StackingClassifier` or `StackingRegressor` over your best models, compared fairly with them.
-- **Segmented evaluation** — the error by group (by contract type, by price band, by job), and where the model should not be used.
-- **Cost-based threshold** — put a money value on each kind of mistake and choose the threshold that minimises the total.
-- **A tiny app** — a Streamlit page that loads your saved model and predicts from a form or an uploaded photo.
-- *Image option:* fine-tune the top of the pretrained network after training the new layer, or compare two pretrained networks.
-
-<br>
-
-## Coding best practices
-
-- **Modularise.** Python logic in `src/functions.py` with reusable functions. The notebook is for the narrative.
-- **One seed.** Define `RANDOM_STATE` once and pass it everywhere, so a second run gives the same numbers.
-- **Name clearly.** Descriptive names for variables, functions and columns. `snake_case` throughout.
-- **Clean up.** Remove unused imports, commented-out code and test cells before submitting.
-- **Restart and run all.** Before you commit a notebook, run it top to bottom on a fresh kernel.
-- **Commit often.** Small, frequent commits with descriptive messages. Working in a pair, your partner should know what you worked on from the history alone.
-
-<br>
-
-## Presentation guidelines
-
-| Component | Duration |
-|---|---|
-| Talking with slides | 7 minutes |
-| Live demo | 3 minutes |
-| **Total** | **10 minutes** |
-
-> [!IMPORTANT]
-> **You present from your own machine by sharing your screen.** Use whatever slide tool you prefer. The demo loads your saved model and predicts for new data: a customer, a house, a client, a photo. Have it open and ready before your slot.
-
-### Suggested slide structure (~10 slides)
-
-1. **Title** — project title and your name or names.
-2. **The problem** — what you predict, for whom, and what they would do with it.
-3. **The data** — source and licence, what one row is, the traps you found.
-4. **The metric and the baseline** — why this metric, and the score to beat.
-5. **What you tried** — the model comparison, with the spread.
-6. **The final model** — the test-set result against the baseline and the cross-validated estimate.
-7. **Where it goes wrong** — the error analysis.
-8. **What drives it** — the interpretation, in business terms.
-9. **Conclusions and limitations** — would you use it, and where not?
-10. **Closing** — project title, your name or names, thank you.
-
-<br>
-
-## Repo layout
-
-The notebooks are laid out in sections with the intent of each one written down, and `src/functions.py` holds a few empty stubs that exist only to show the shape. **This is a place to start, not a template to fill in** — rename things, add sections, delete the ones that do not fit your data. You are graded on the work, not on how closely you followed the scaffold.
-
-```
-.
-├── README.md                                    this brief — replace it with your own
-├── RUBRIC.md                                    how you are graded
-├── requirements.txt
-├── download_data.py                             fetches your chosen dataset into data/raw/
-├── data/
-│   ├── raw/                                     downloaded data, gitignored
-│   └── README.md                                the four options, their traps, licences
-├── models/                                      the saved model, gitignored
-├── notebooks/
-│   ├── 01_eda_and_baseline.ipynb                frame, look, split, baseline
-│   ├── 02_pipelines_and_models.ipynb            pipelines, compare, tune, threshold
-│   └── 03_evaluation_and_interpretation.ipynb   test once, interpret, save, report
-└── src/
-    └── functions.py                             your reusable logic
-```
-
-## Getting set up
+### 4. The demo app
 
 ```bash
-# 1. Click "Use this template" above, then clone YOUR new repo
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
-
-# 2. Check you already have the libraries - a current Anaconda install does.
-#    If this prints, skip to step 3 and install nothing.
-python -c "import pandas, numpy, matplotlib, seaborn, sklearn, joblib; print('all present')"
-
-#    Image option only: TensorFlow is not part of Anaconda.
-python -c "import tensorflow as tf; print(tf.__version__)"
-
-#    Only if a check failed. See the note in requirements.txt first: running pip
-#    against a conda environment can downgrade packages you did not ask about.
-pip install -r requirements.txt
-
-# 3. Download your dataset
-python download_data.py telco        # or: houses, bank, flowers
-
-# 4. Open the first notebook
-jupyter lab notebooks/01_eda_and_baseline.ipynb
+streamlit run app.py
 ```
 
-<br>
+Upload a painting and the app shows the predicted painter with its confidence, the probabilities for all six painters. Inference runs on the CPU.
 
-## Tips for success
+The page uses the fonts of the project's title slide, loaded from Google Fonts, so it needs an internet connection to look as intended. For black accents and a light theme regardless of the system setting, add this to `.streamlit/config.toml`:
 
-1. **Choose your data on launch day and commit to it.** Switching mid-week costs you time you do not have.
-2. **Beat the baseline before you beat anyone else.** A model that cannot beat a dummy is not a model.
-3. **Never look at the test set until Thursday.** Every peek makes your final number a little less true.
-4. **Put everything that learns inside the pipeline.** A scaler fitted before the split is the most common way to fool yourself.
-5. **Prefer a simple model you understand** when a complex one is within the noise.
-6. **Commit early and often.** In a pair, so your partner knows what changed; on your own, so you do.
-7. **Ask for help early.** Stuck for more than 30 minutes? Reach out to a classmate, your TA or your teacher.
-8. **Practise the presentation out loud** at least once before Friday. Time yourselves.
-9. **Read [`RUBRIC.md`](RUBRIC.md).** It tells you exactly what is being evaluated.
+```toml
+[theme]
+base = "light"
+primaryColor = "#111111"
+backgroundColor = "#F1EEEA"
+secondaryBackgroundColor = "#E8E4DE"
+textColor = "#111111"
+```
 
-Good luck. Make something you would trust.
+### Reproducibility
+
+Splits and bootstrap intervals use a fixed random seed (42). Training results can still vary slightly between runs because of random initialization and augmentation, and the reported numbers come from a single trained model.
+
+---
+
+## Credits
+
+- Images and labels: [WikiArt](https://www.wikiart.org), downloaded with the [WikiART Crawler](https://github.com/asahi417/wikiart-image-dataset) library by asahi417.
+- Model: MobileNetV2 (Sandler et al., 2018) with ImageNet pretraining (Deng et al., 2009), through `torchvision`.
+- Near-duplicate detection: `imagededup`.
+- Built as Project 2 of the Ironhack Data Science & Machine Learning Bootcamp.

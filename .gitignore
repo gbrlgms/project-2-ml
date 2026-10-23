@@ -1,5 +1,6 @@
 # Data is never committed. Anyone cloning the repo runs download_data.py.
 data/raw/*
+data/split/*
 !data/raw/.gitkeep
 !data/README.md
 
@@ -10,6 +11,7 @@ models/*
 *.pkl
 *.keras
 *.h5
+*.pt
 
 # Jupyter
 .ipynb_checkpoints/

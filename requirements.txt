@@ -1,31 +1,59 @@
 # Minimum versions, not exact pins: most of you are on Anaconda, and hard pins
 # fight an existing conda environment.
 #
-# CHECK BEFORE YOU INSTALL. A current Anaconda install already has everything
-# below except TensorFlow, and running pip against a conda environment can
-# change versions you did not ask it to - we have seen it downgrade numpy,
+# CHECK BEFORE YOU INSTALL. A current Anaconda install already has most of the
+# general-purpose packages below, and running pip against a conda environment
+# can change versions you did not ask it to - we have seen it downgrade numpy,
 # which breaks other packages that were compiled against the newer one. So run
 # this first:
 #
-#   python -c "import pandas, numpy, matplotlib, seaborn, sklearn, joblib; print('all present')"
+#   python -c "import pandas, numpy, matplotlib, seaborn, sklearn, joblib, networkx, PIL, torch, torchvision, imagededup, streamlit; print('all present')"
 #
-# If that prints, you are done - do not install anything. If it fails, install
-# only what is missing, and prefer conda if that is how you set Python up:
+# If that prints, you are done - do not install anything. If it fails, the
+# error names the first missing package. Install only what is missing, and
+# prefer conda for the general-purpose ones if that is how you set Python up:
 #
-#   conda install pandas numpy matplotlib seaborn scikit-learn joblib
+#   conda install pandas numpy matplotlib seaborn scikit-learn joblib networkx pillow
 #   pip install -r requirements.txt        # or this, in a fresh venv
+#
+# Python 3.11 or newer. If a compiled package (PyTorch, for example) crashes
+# on a very new Python, create an environment with 3.11 or 3.12 instead.
+#
+# Do not install TensorFlow in this environment. The project uses PyTorch, and
+# the two bundle native libraries that can conflict and crash the notebook.
 
+# --- Data handling, evaluation, plots ---------------------------------------
 pandas>=2.0
 numpy>=1.24
 matplotlib>=3.7
 seaborn>=0.12
-scikit-learn>=1.4
+scikit-learn>=1.4        # DummyClassifier, StratifiedGroupKFold, metrics
 joblib>=1.3
+pillow>=10.0             # image loading and resizing
+networkx>=3.0            # groups near-duplicate images into clusters
 
-# Notebooks. Already present if you installed Anaconda or JupyterLab.
+# --- Deep learning (PyTorch) -------------------------------------------------
+# A plain "pip install torch torchvision" is enough. On Apple Silicon the
+# standard wheels already include the MPS (GPU) backend.
+torch>=2.0
+torchvision>=0.15        # torchvision.transforms.v2 and MobileNetV2 weights
+
+# --- Near-duplicate detection (perceptual hashing, CNN embeddings) ----------
+# Recent versions run on PyTorch; older ones depended on TensorFlow, so upgrade
+# if pip starts pulling TensorFlow in.
+imagededup>=0.3
+
+# --- Demo app ---------------------------------------------------------------
+# 1.50 or newer: app.py uses width="stretch", which replaced the deprecated
+# use_container_width argument.
+streamlit>=1.50
+
+# --- Notebooks. Already present if you installed Anaconda or JupyterLab. ----
 jupyterlab>=4.0
 ipykernel>=6.0
 
-# Image option only (flower photos). Not part of Anaconda:
-#   python -c "import tensorflow as tf; print(tf.__version__)"
-# tensorflow>=2.16
+# --- Data download (only needed to re-create the image folders) -------------
+# WikiART Crawler is not installed from PyPI. Install it from GitHub:
+#   pip install git+https://github.com/asahi417/wikiart-image-dataset.git
+# or clone the repository and run "pip install ." inside it. It needs an
+# internet connection and caches the images in ~/.cache/wikiartcrawler.
